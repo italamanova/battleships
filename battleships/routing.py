@@ -1,16 +1,13 @@
-
 from channels.auth import AuthMiddlewareStack
 from channels.routing import ProtocolTypeRouter, URLRouter
-from django.urls import path
 
-from game.consumers import MoveConsumer
+import game.routing
 
 application = ProtocolTypeRouter({
+    # (http->django views is added by default)
     'websocket': AuthMiddlewareStack(
         URLRouter(
-            [
-                path('game/', MoveConsumer),
-            ]
-        ),
+            game.routing.websocket_urlpatterns
+        )
     ),
 })

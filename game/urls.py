@@ -1,10 +1,9 @@
 from django.conf.urls import url
 
-from game.views import user_list
+from game.views import game
 from . import views
 
 app_name = 'game'
 urlpatterns = [
-    url(r'^$', user_list, name='user_list'),
+    url(r'^(?P<game_name>[^/]+)/(?P<player_id>[^/]+)/$', views.game, name='room'),
 ]
-
