@@ -1,6 +1,5 @@
 from collections import namedtuple
 
-
 ShipType = namedtuple('ShipType', ['name', 'size'])
 
 SHIP_TYPES = [
@@ -10,3 +9,4 @@ SHIP_TYPES = [
     ShipType('Battleship', 4),
     ShipType('Carrier', 5),
 ]
+

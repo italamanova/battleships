@@ -1,132 +1,305 @@
-$(function () {
-  "use strict";
+var status = 'start';
+var placement = [];
 
-  // for better performance - to avoid searching in DOM
-  var content = $('#content');
-  var input = $('#input');
-  var status = $('#status');
+var gameSocket = new WebSocket(
+    'ws://' + window.location.host +
+    '/ws/game/' + gameName + '/' + player + '/');
 
-  console.log(roomName);
-  // my color assigned by the server
-  var myColor = false;
-  // my name sent to the server
-  var myName = false;
+gameSocket.onmessage = function (e) {
+    var data = JSON.parse(e.data);
+    var message = data['message'];
+    console.log(message);
+};
 
-  // if user is running mozilla then use it's built-in WebSocket
-  window.WebSocket = window.WebSocket || window.MozWebSocket;
+gameSocket.onclose = function (e) {
+    console.error('Chat socket closed unexpectedly');
+};
 
-  // if browser doesn't support WebSocket, just show
-  // some notification and exit
-  if (!window.WebSocket) {
-    content.html($('<p>',
-      { text:'Sorry, but your browser doesn\'t support WebSocket.'}
-    ));
-    input.hide();
-    $('span').hide();
-    return;
-  }
 
-  // open connection
-    var connection = new WebSocket(
-        'ws://' + window.location.host +
-        '/ws/game/' + roomName + '/');
+var playerFleet;
 
-  connection.onopen = function () {
-    // first we want users to enter their names
-    input.removeAttr('disabled');
-    status.text('Choose name:');
-  };
 
-  connection.onerror = function (error) {
-    // just in there were some problems with connection...
-    content.html($('<p>', {
-      text: 'Sorry, but there\'s some problem with your '
-         + 'connection or the server is down.'
-    }));
-  };
+// Object Constructors
+function Fleet(name) {
+    this.name = name;
+    this.shipDetails = [{"name": "carrier", "length": 5},
+        {"name": "battleship", "length": 4},
+        {"name": "cruiser", "length": 3},
+        {"name": "destroyer", "length": 3},
+        {"name": "frigate", "length": 2}];
+    this.numOfShips = this.shipDetails.length;
+    this.ships = [];
+    this.currentShipSize = 0;
+    this.currentShip = 0;
+    this.initShips = function () {
+        for (var i = 0; i < this.numOfShips; i++) {
+            this.ships[i] = new Ship(this.shipDetails[i].name);
+            this.ships[i].length = this.shipDetails[i].length;
+        }
+    };
+}
 
-  // most important part - incoming messages
-  connection.onmessage = function (message) {
-    // try to parse JSON message. Because we know that the server
-    // always returns JSON this should work without any problem but
-    // we should make sure that the massage is not chunked or
-    // otherwise damaged.
-    try {
-      var json = JSON.parse(message.data);
-    } catch (e) {
-      console.log('Invalid JSON: ', message.data);
-      return;
+function Ship(name) {
+    this.name = name;
+    this.length = 0;
+    this.hitPoints = [];
+    this.populateHorzHits = function (start) {
+        for (var i = 0; i < this.length; i++, start++) {
+            this.hitPoints[i] = start;
+        }
+    };
+    this.populateVertHits = function (start) {
+        for (var i = 0; i < this.length; i++, start += 10) {
+            this.hitPoints[i] = start;
+        }
+    };
+    this.checkLocation = function (loc) {
+        for (var i = 0; i < this.length; i++) {
+            if (this.hitPoints[i] == loc) return true;
+        }
+        return false;
+    };
+}
+
+var output = {
+    "welcome": " > Welcome to BattleShip.  Use the menu above to get started.",
+    "not": " > This option is not currently available.",
+    "player1": " > Would you like to place your own ships or have the computer randomly do it for you?",
+    "self": " > Use the mouse and the Horizontal and Vertial buttons to place your ships on the bottom grid.",
+    "overlap": " > You can not overlap ships.  Please try again.",
+    "start": " > Use the mouse to fire on the top grid.  Good Luck!",
+    placed: function (name) {
+        return " > Your " + name + " been placed.";
     }
+};
 
-    // NOTE: if you're not sure about the JSON structure
-    // check the server source code above
-    // first response from the server with user's color
-    if (json.type === 'color') {
-      myColor = json.data;
-      status.text(myName + ': ').css('color', myColor);
-      input.removeAttr('disabled').focus();
-      // from now user can start sending messages
-    } else if (json.type === 'history') { // entire message history
-      // insert every single message to the chat window
-      for (var i=0; i < json.data.length; i++) {
-      addMessage(json.data[i].author, json.data[i].text,
-          json.data[i].color, new Date(json.data[i].time));
-      }
-    } else if (json.type === 'message') { // it's a single message
-      // let the user write another message
-      input.removeAttr('disabled');
-      addMessage(json.data.author, json.data.text,
-                 json.data.color, new Date(json.data.time));
-    } else {
-      console.log('Hmm..., I\'ve never seen JSON like this:', json);
+var topBoard = {
+    allHits: [],
+    highlight: function (square) {
+        $(square).addClass("target").off("mouseleave").on("mouseleave", function () {
+            $(this).removeClass("target");
+        });
+
+        $(square).off("click").on("click", function () {
+            if (!($(this).hasClass("used"))) {
+                $(this).removeClass("target").addClass("used");
+            }
+        });
+    },
+}
+
+//  Create the games grids and layout
+$(document).ready(function () {
+    for (var i = 1; i <= 100; i++) {
+        // The number and letter designators
+        if (i < 11) {
+            $(".top").prepend("<span class='aTops'>" + Math.abs(i - 11) + "</span>");
+            $(".bottom").prepend("<span class='aTops'>" + Math.abs(i - 11) + "</span>");
+        }
+        $(".grid").append("<li class='points offset2" + i + "'><span class='hole'></span></li>");
+
+        if (i == 11) {
+            $(".top").prepend("<span class='aTops hidezero'>" + Math.abs(i - 11) + "</span>");
+            $(".bottom").prepend("<span class='aTops hidezero'>" + Math.abs(i - 11) + "</span>");
+        }
+        if (i > 90) {
+            $(".top").append("<span class='aLeft'>" + (i - 90) + "</span>");
+            $(".bottom").append("<span class='aLeft'>" + (i - 90) + "</span>");
+        }
     }
-  };
+    $(".text").text(output.welcome);
+})
 
-  /**
-   * Send message when user presses Enter key
-   */
-  input.keydown(function(e) {
-    if (e.keyCode === 13) {
-      var msg = $(this).val();
-      if (!msg) {
-        return;
-      }
-      // send the message as an ordinary text
-      connection.send(msg);
-      $(this).val('');
-      // disable the input field to make the user wait until server
-      // sends back response
-      input.attr('disabled', 'disabled');
+// Start the game setup
+$(document).ready(function () {
+    $(".start").on("click", function () {
+        $(".text").text(output.self);
+        gameSetup(this);
 
-      // we know that the first message sent from a user their name
-      if (myName === false) {
-        myName = msg;
-      }
-    }
-  });
-
-  /**
-   * This method is optional. If the server wasn't able to
-   * respond to the in 3 seconds then show some error message
-   * to notify the user that something is wrong.
-   */
-  setInterval(function() {
-    if (connection.readyState !== 1) {
-      status.text('Error');
-      input.attr('disabled', 'disabled').val(
-          'Unable to communicate with the WebSocket server.');
-    }
-  }, 3000);
-
-  /**
-   * Add message to the chat window
-   */
-  function addMessage(author, message, color, dt) {
-    content.prepend('<p><span style="color:' + color + '">'
-        + author + '</span> @ ' + (dt.getHours() < 10 ? '0'
-        + dt.getHours() : dt.getHours()) + ':'
-        + (dt.getMinutes() < 10
-          ? '0' + dt.getMinutes() : dt.getMinutes())
-        + ': ' + message + '</p>');
-  }
+        gameSocket.send(JSON.stringify({
+            'message': 'start'
+        }));
+    });
 });
+
+
+function gameSetup() {
+    $(".start").remove();
+    var horizontal_butoon = $('<div class=\'buttons horz\'>Horizontal</div>');
+    var vertical_button = $('<div class=\'buttons vert\'>Vertical</div>');
+    horizontal_butoon.appendTo($("#buttonPanel"));
+    vertical_button.appendTo($("#buttonPanel"));
+
+    playerFleet = new Fleet("Player 1");
+    playerFleet.initShips();
+    placeShip(playerFleet.ships[playerFleet.currentShip], playerFleet);
+}
+
+function placeShip(ship, fleet) {
+    // check orientation of ship and highlight accordingly
+    var orientation = "horz";
+    $(".vert").off("click").on("click", function () {
+        orientation = "vert";
+    });
+    $(".horz").off("click").on("click", function () {
+        orientation = "horz";
+    });
+    // when the user enters the grid have the ships lenght highlighted with the
+    // ships length.
+    $(".bottom").find(".points").off("mouseenter").on("mouseenter", function () {
+        console.log('ship ' + $(this).attr('class'));
+        var num = $(this).attr('class').slice(15);
+        if (orientation == "horz") {
+            displayShipHorz(parseInt(num), ship, this, fleet);
+        }
+        else {
+            displayShipVert(parseInt(num), ship, this, fleet);
+        }
+    });
+}
+
+
+function displayShipHorz(location, ship, point, fleet) {
+    var endPoint = location + ship.length - 2;
+    if (!(endPoint % 10 >= 0 && endPoint % 10 < ship.length - 1)) {
+        for (var i = location; i < (location + ship.length); i++) {
+            $(".bottom ." + i).addClass("highlight");
+        }
+        $(point).off("click").on("click", function () {
+            setShip(location, ship, "horz", fleet, "self");
+        });
+    }
+    $(point).off("mouseleave").on("mouseleave", function () {
+        removeShipHorz(location, ship.length);
+    });
+}
+
+function displayShipVert(location, ship, point, fleet) {
+    var endPoint = (ship.length * 10) - 10;
+    var inc = 0;
+    if (location + endPoint <= 100) {
+        for (var i = location; i < (location + ship.length); i++) {
+            $(".bottom ." + (location + inc)).addClass("highlight");
+            inc = inc + 10;
+        }
+        $(point).off("click").on("click", function () {
+            setShip(location, ship, "vert", fleet, "self");
+        });
+    }
+    $(point).off("mouseleave").on("mouseleave", function () {
+        removeShipVert(location, ship.length);
+    });
+}
+
+function removeShipHorz(location, length) {
+    for (var i = location; i < location + length; i++) {
+        $(".bottom ." + i).removeClass("highlight");
+    }
+}
+
+function removeShipVert(location, length) {
+    var inc = 0;
+    for (var i = location; i < location + length; i++) {
+        $(".bottom ." + (location + inc)).removeClass("highlight");
+        inc = inc + 10;
+    }
+}
+
+function setShip(location, ship, orientation, genericFleet, type) {
+    // var placements = []
+    // var x_placement = location % 10;
+    // var y_placement = Math.ceil(location / 10);
+    // placements.push({'x': x_placement, 'y': y_placement});
+    // if (orientation == 'horz') {
+    //     for (var i = 1; i < ship.length; i++) {
+    //         placements.push({'x': x_placement + i, 'y': y_placement})
+    //     }
+    // } else {
+    //     for (var i = 1; i < ship.length; i++) {
+    //         placements.push({'x': x_placement, 'y': y_placement + i})
+    //     }
+    // }
+    // console.log('placements ');
+    // console.log(location, ship, orientation);
+    // console.log(placements);
+
+
+    if (!(checkOverlap(location, ship.length, orientation, genericFleet))) {
+        if (orientation == "horz") {
+            genericFleet.ships[genericFleet.currentShip].populateHorzHits(location);
+            $(".text").text(output.placed(genericFleet.ships[genericFleet.currentShip].name + " has"));
+            for (var i = location; i < (location + ship.length); i++) {
+                $(".bottom ." + i).addClass(genericFleet.ships[genericFleet.currentShip].name);
+                $(".bottom ." + i).children().removeClass("hole");
+            }
+            if (++genericFleet.currentShip == genericFleet.numOfShips) {
+                $(".text").text(output.placed("ships have"));
+                $(".bottom").find(".points").off("mouseenter");
+                setTimeout(startGame, 500);
+            } else {
+                placeShip(genericFleet.ships[genericFleet.currentShip], genericFleet);
+            }
+
+        } else {
+            var inc = 0;
+            genericFleet.ships[genericFleet.currentShip].populateVertHits(location);
+            $(".text").text(output.placed(genericFleet.ships[genericFleet.currentShip].name + " has"));
+            for (var i = location; i < (location + ship.length); i++) {
+                $(".bottom ." + (location + inc)).addClass(genericFleet.ships[genericFleet.currentShip].name);
+                $(".bottom ." + (location + inc)).children().removeClass("hole");
+                inc = inc + 10;
+            }
+            if (++genericFleet.currentShip == genericFleet.numOfShips) {
+                $(".text").text(output.placed("ships have"));
+                $(".bottom").find(".points").off("mouseenter");
+            }
+        }
+    }
+}
+
+function checkOverlap(location, length, orientation, genFleet) {
+    var loc = location;
+    if (orientation == "horz") {
+        var end = location + length;
+        for (; location < end; location++) {
+            for (var i = 0; i < genFleet.currentShip; i++) {
+                if (genFleet.ships[i].checkLocation(location)) {
+                    return true;
+                }
+            }
+        }
+    } else {
+        var end = location + (10 * length);
+        for (; location < end; location += 10) {
+            for (var i = 0; i < genFleet.currentShip; i++) {
+                if (genFleet.ships[i].checkLocation(location)) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+
+function startGame() {
+    $(".layout").fadeOut("fast", function () {
+        $(".console").css({"margin-top": "31px"});
+    });
+    $(".text").text(output.start);
+    console.log(playerFleet);
+    highlightBoard();
+}
+
+function highlightBoard() {
+    if (playerFleet.ships.length == 0) {
+        $(".top").find(".points").off("mouseenter").off("mouseleave").off("click");
+    } else {
+        $(".top").find(".points").off("mouseenter mouseover").on("mouseenter mouseover", function () {
+            // only allow target highlight on none attempts
+            if (!($(this).hasClass("used"))) topBoard.highlight(this);
+        });
+    }
+}
+
+

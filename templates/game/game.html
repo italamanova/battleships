@@ -1,0 +1,54 @@
+{% load i18n %}
+{% load static %}
+
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>BattleShip</title>
+    {% block styles %}
+
+        <link href="{% static 'css/styles.css' %}" rel="stylesheet" media="all"/>
+        <link href="{% static 'css/drag_and_drop.css' %}" rel="stylesheet" media="all"/>
+    {% endblock %}
+</head>
+<body>
+<div id="main">
+    <div class="board">
+        <div class="displays">
+            <div class="top">
+                <ul class="grid"></ul>
+            </div>
+            <div class="bottom">
+                <ul class="grid"></ul>
+            </div>
+        </div>
+    </div>
+    <div class="panel">
+        <div class="topPanel">
+            <div id="buttonPanel" class="layout">
+                <div class='buttons start'>Start</div>
+            </div>
+        </div>
+        <div class='console'>
+            <span class='text'></span></div>
+    </div>
+</div>
+
+
+
+{% block scripts %}
+
+    <script>
+        var gameName = {{ game_name }};
+        var player = {{ player }};
+
+        console.log('gameName ' + gameName);
+    </script>
+
+    <script src="{% static 'js/jquery.js' %}"></script>
+    <script src="{% static 'js/game.js' %}"></script>
+
+
+{% endblock %}
+</body>
+</html>
